@@ -45,14 +45,14 @@ NSCOUNT - unsigned 16 bit; number of name server resources records in authority 
 ARCOUNT - unsigned 16 bit; number of resource records in additional records section
 '''
 
-def write_header():
+def write_header(recurse=0):
     message_id = random.getrandbits(16).to_bytes(2, byteorder='big')
     print(f"Message ID: { int.from_bytes(message_id, 'big')}")
     qr = 0
     opcode = 0
     aa = 0
     tc = 0
-    rd = 0 
+    rd = recurse 
     ra = 0
     z = 0
     rcode = 0
@@ -99,8 +99,8 @@ def write_question_section(qname):
     qclass = 1
     return labels + int.to_bytes(qtype, 2, 'big') + int.to_bytes(qclass, 2, 'big') 
 
-def write_message(qname):
-    header = write_header()
+def write_message(qname, recurse):
+    header = write_header(recurse)
     question = write_question_section(qname)
     return header + question 
 
@@ -125,6 +125,9 @@ def read_rdata(msg, start_index, rr_type, rd_length):
             start_index += 4
             addresses.append(address)
         return start_index, addresses 
+    if rr_type == 5: # CNAME
+        start_index, label = read_labels(msg, start_index)
+        return start_index, [label] 
     if rr_type == 6: # SOA
         # according to rfc1035; SOA records cause no additional section processing
         return start_index, [] 
@@ -228,11 +231,12 @@ def read_message(msg):
         return None
     if an_count > 0:
         print(";; ANSWER SECTION:")
-        start_index, label, rr_type, rr_class, ttl, rd_length = read_resource_record(msg, start_index)
-        start_index, rdatas = read_rdata(msg, start_index, rr_type, rd_length)
+        for i in range(an_count):
+            start_index, label, rr_type, rr_class, ttl, rd_length = read_resource_record(msg, start_index)
+            start_index, rdatas = read_rdata(msg, start_index, rr_type, rd_length)
 
-        for rdata in rdatas:
-            print(f"{label}\t{ttl}\t{CLASS_MAPPING.get(rr_class, 'unknown')}\t{TYPE_MAPPING.get(rr_type, 'unknown')}\t{rdata}")
+            for rdata in rdatas:
+                print(f"{label}\t{ttl}\t{CLASS_MAPPING.get(rr_class, 'unknown')}\t{TYPE_MAPPING.get(rr_type, 'unknown')}\t{rdata}")
     if ns_count > 0:
         print("Given a NS RDATA; check the additional records section")
         return None
@@ -250,18 +254,19 @@ if __name__ == "__main__":
     print("Welcome to diggy!")
 
     args = sys.argv
+    recurse = 0
     if len(args) < 3:
         print(f"Usage {args[0]} [dns_server] [qname]")
         exit()
+    if len(args) == 4:
+        recurse = 1 
 
     dns_server = args[1]
     qname = args[2]
     print(f"Using DNS Server: {dns_server}")
     print(f"Querying for: {qname}")
 
-    msg = write_message(qname)
-    diggy_address = "127.0.0.1"
-    diggy_port = 30001
+    msg = write_message(qname, recurse=recurse)
     diggy = socket.socket(family = socket.AF_INET, type = socket.SOCK_DGRAM)
     answer = send_recv_message(diggy, msg, dns_server, 2048)
     read_message(answer)
